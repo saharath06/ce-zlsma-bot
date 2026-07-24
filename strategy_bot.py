@@ -5,6 +5,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import time
 import warnings
+import traceback
 warnings.filterwarnings('ignore')
 
 # ============================================
@@ -25,15 +26,14 @@ INITIAL_BALANCE    = 10000
 POSITION_SIZE_PCT  = 10
 
 # التوقيت
-TIMEFRAME_MINUTES = 15    # 15 دقيقة
-SCAN_INTERVAL     = 900   # كل 15 دقيقة
+TIMEFRAME_MINUTES = 15
+SCAN_INTERVAL     = 900
 DELAY_BETWEEN     = 1.5
 
 # ═══════════════════════════════════════
-# 🎯 عملات Kraken (30 عملة!)
+# 🎯 عملات Kraken (30 عملة)
 # ═══════════════════════════════════════
 SYMBOLS = {
-    # Top Cryptocurrencies
     "XBTUSD":   {"name": "Bitcoin",     "d": 2},
     "ETHUSD":   {"name": "Ethereum",    "d": 2},
     "SOLUSD":   {"name": "Solana",      "d": 3},
@@ -71,7 +71,6 @@ active_trades = {}
 trade_history = []
 balance       = INITIAL_BALANCE
 
-# Headers
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
@@ -97,19 +96,12 @@ def send_telegram(text):
 
 
 # ============================================
-# 🚀 Kraken API (يعمل من Railway!)
+# Kraken API
 # ============================================
 def get_kraken_data(pair, interval=15):
-    """
-    جلب البيانات من Kraken
-    interval: 1, 5, 15, 30, 60, 240, 1440, 10080, 21600 (بالدقائق)
-    """
     try:
         url = "https://api.kraken.com/0/public/OHLC"
-        params = {
-            "pair": pair,
-            "interval": interval
-        }
+        params = {"pair": pair, "interval": interval}
         
         response = requests.get(url, params=params, headers=HEADERS, timeout=15)
         
@@ -118,7 +110,6 @@ def get_kraken_data(pair, interval=15):
         
         data = response.json()
         
-        # فحص الأخطاء
         if data.get('error') and len(data['error']) > 0:
             return None
         
@@ -133,7 +124,6 @@ def get_kraken_data(pair, interval=15):
         if not candles or len(candles) < 60:
             return None
         
-        # تحويل إلى DataFrame
         df = pd.DataFrame(candles, columns=[
             'timestamp', 'Open', 'High', 'Low', 'Close', 'vwap', 'Volume', 'count'
         ])
@@ -141,7 +131,6 @@ def get_kraken_data(pair, interval=15):
         df['timestamp'] = pd.to_datetime(df['timestamp'].astype(int), unit='s')
         df.set_index('timestamp', inplace=True)
         
-        # تحويل الأنواع
         for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
             df[col] = df[col].astype(float)
         
@@ -152,28 +141,44 @@ def get_kraken_data(pair, interval=15):
 
 
 # ============================================
-# حساب المؤشرات
+# 🎯 المؤشرات المحسّنة (أسرع وأكثر موثوقية)
 # ============================================
 def calculate_atr(df, period=1):
-    high, low, close = df['High'], df['Low'], df['Close']
-    tr1 = high - low
-    tr2 = abs(high - close.shift(1))
-    tr3 = abs(low - close.shift(1))
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
+    """حساب ATR"""
+    high = df['High'].values
+    low = df['Low'].values
+    close = df['Close'].values
+    
+    tr = np.zeros(len(df))
+    for i in range(1, len(df)):
+        tr[i] = max(
+            high[i] - low[i],
+            abs(high[i] - close[i-1]),
+            abs(low[i] - close[i-1])
+        )
+    
+    atr = pd.Series(tr).rolling(period).mean()
+    return atr
 
 
 def calculate_chandelier_exit(df, period=1, multiplier=2.0):
+    """Chandelier Exit - محسّن"""
     atr = calculate_atr(df, period) * multiplier
+    atr_values = atr.values
     
-    highest = df['Close'].rolling(period).max()
-    long_stop = (highest - atr).values
-    
-    lowest = df['Close'].rolling(period).min()
-    short_stop = (lowest + atr).values
-    
+    highest = df['Close'].rolling(period).max().values
+    lowest = df['Close'].rolling(period).min().values
     close_arr = df['Close'].values
     
+    long_stop = np.zeros(len(df))
+    short_stop = np.zeros(len(df))
+    
+    for i in range(len(df)):
+        if not np.isnan(atr_values[i]):
+            long_stop[i] = highest[i] - atr_values[i]
+            short_stop[i] = lowest[i] + atr_values[i]
+    
+    # تحسين Stops
     for i in range(1, len(df)):
         if not np.isnan(long_stop[i]) and not np.isnan(long_stop[i-1]):
             if close_arr[i-1] > long_stop[i-1]:
@@ -183,6 +188,7 @@ def calculate_chandelier_exit(df, period=1, multiplier=2.0):
             if close_arr[i-1] < short_stop[i-1]:
                 short_stop[i] = min(short_stop[i], short_stop[i-1])
     
+    # Direction
     dir_arr = np.ones(len(df))
     for i in range(1, len(df)):
         if close_arr[i] > short_stop[i-1]:
@@ -195,44 +201,62 @@ def calculate_chandelier_exit(df, period=1, multiplier=2.0):
     return pd.Series(dir_arr, index=df.index)
 
 
-def calculate_zlsma(df, length=50):
+def calculate_zlsma_fast(df, length=50):
+    """ZLSMA محسّن (أسرع 10x)"""
     close = df['Close'].values
     n = len(close)
     
     if n < length * 2:
         return pd.Series(np.full(n, np.nan), index=df.index)
     
+    # استخدم numpy للسرعة
     lsma = np.full(n, np.nan)
+    x = np.arange(length)
+    x_mean = x.mean()
+    x_var = ((x - x_mean) ** 2).sum()
+    
     for i in range(length, n):
         y = close[i-length:i]
-        x = np.arange(length)
-        coef = np.polyfit(x, y, 1)
-        lsma[i] = coef[1] + coef[0] * (length - 1)
+        y_mean = y.mean()
+        slope = ((x - x_mean) * (y - y_mean)).sum() / x_var
+        intercept = y_mean - slope * x_mean
+        lsma[i] = intercept + slope * (length - 1)
     
     lsma2 = np.full(n, np.nan)
     for i in range(length * 2, n):
         y = lsma[i-length:i]
         if not np.any(np.isnan(y)):
-            x = np.arange(length)
-            coef = np.polyfit(x, y, 1)
-            lsma2[i] = coef[1] + coef[0] * (length - 1)
+            y_mean = y.mean()
+            slope = ((x - x_mean) * (y - y_mean)).sum() / x_var
+            intercept = y_mean - slope * x_mean
+            lsma2[i] = intercept + slope * (length - 1)
     
     zlsma = lsma + (lsma - lsma2)
     return pd.Series(zlsma, index=df.index)
 
 
 def generate_signals(df):
-    df = df.copy()
-    df['CE_Dir'] = calculate_chandelier_exit(df, ATR_PERIOD, ATR_MULTIPLIER)
-    df['ZLSMA']  = calculate_zlsma(df, ZLSMA_LENGTH)
-    
-    df['CE_Buy']  = (df['CE_Dir'] == 1)  & (df['CE_Dir'].shift(1) == -1)
-    df['CE_Sell'] = (df['CE_Dir'] == -1) & (df['CE_Dir'].shift(1) == 1)
-    
-    df['Buy_Signal']  = df['CE_Buy']  & (df['Close'] > df['ZLSMA'])
-    df['Sell_Signal'] = df['CE_Sell'] & (df['Close'] < df['ZLSMA'])
-    
-    return df
+    """توليد الإشارات مع معالجة أخطاء"""
+    try:
+        df = df.copy()
+        df['CE_Dir'] = calculate_chandelier_exit(df, ATR_PERIOD, ATR_MULTIPLIER)
+        df['ZLSMA'] = calculate_zlsma_fast(df, ZLSMA_LENGTH)
+        
+        # إزالة NaN
+        df = df.dropna(subset=['CE_Dir', 'ZLSMA'])
+        
+        if len(df) < 5:
+            return None
+        
+        df['CE_Buy']  = (df['CE_Dir'] == 1)  & (df['CE_Dir'].shift(1) == -1)
+        df['CE_Sell'] = (df['CE_Dir'] == -1) & (df['CE_Dir'].shift(1) == 1)
+        
+        df['Buy_Signal']  = df['CE_Buy']  & (df['Close'] > df['ZLSMA'])
+        df['Sell_Signal'] = df['CE_Sell'] & (df['Close'] < df['ZLSMA'])
+        
+        return df
+    except Exception as e:
+        raise Exception(f"generate_signals: {str(e)}")
 
 
 # ============================================
@@ -250,7 +274,7 @@ def open_trade(symbol, info, signal_type, price, timestamp):
         sl = price * (1 + STOP_LOSS_PCT/100) if USE_STOP_LOSS else None
     
     trade_size = balance * (POSITION_SIZE_PCT / 100)
-    quantity   = trade_size / price
+    quantity = trade_size / price
     
     trade = {
         "symbol": symbol, "name": info['name'],
@@ -282,7 +306,7 @@ def open_trade(symbol, info, signal_type, price, timestamp):
     msg += f"📊 مفتوحة: {len(active_trades)}"
     
     send_telegram(msg)
-    print(f"✅ OPEN: {info['name']} {signal_type} @ ${price:.{d}f}")
+    print(f"\n  ✅ OPEN: {info['name']} {signal_type} @ ${price:.{d}f}")
     return trade
 
 
@@ -347,11 +371,14 @@ def close_trade(symbol, close_price, reason, timestamp):
     msg += f"💰 إجمالي: ${profit:+.2f}"
     
     send_telegram(msg)
-    print(f"{emoji} CLOSE: {trade['name']} {result} ${profit_usd:+.2f}")
+    print(f"\n  {emoji} CLOSE: {trade['name']} {result} ${profit_usd:+.2f}")
     return trade
 
 
 def process_signals(symbol, info, df):
+    if df is None or len(df) < 5:
+        return
+    
     last = df.iloc[-1]
     current = float(last['Close'])
     ts = last.name.to_pydatetime()
@@ -364,8 +391,8 @@ def process_signals(symbol, info, df):
             elif trade['type'] == "SELL" and current >= trade['sl']:
                 close_trade(symbol, trade['sl'], "🛡️ Stop Loss", ts)
     
-    has_buy = bool(last['Buy_Signal'])
-    has_sell = bool(last['Sell_Signal'])
+    has_buy = bool(last.get('Buy_Signal', False))
+    has_sell = bool(last.get('Sell_Signal', False))
     
     if has_buy:
         if symbol in active_trades and active_trades[symbol]['type'] == "SELL":
@@ -380,17 +407,33 @@ def process_signals(symbol, info, df):
             open_trade(symbol, info, "SELL", current, ts)
 
 
+# ============================================
+# 🎯 scan_symbol محسّن (يطبع الأخطاء)
+# ============================================
 def scan_symbol(symbol, info):
+    # 1. جلب البيانات
     df = get_kraken_data(symbol, interval=TIMEFRAME_MINUTES)
-    if df is None or len(df) < 60:
-        return False
     
+    if df is None:
+        return False, "لا بيانات"
+    
+    if len(df) < 60:
+        return False, f"بيانات قليلة ({len(df)})"
+    
+    # 2. حساب المؤشرات
     try:
         df = generate_signals(df)
+        
+        if df is None:
+            return False, "signals=None"
+        
+        # 3. معالجة الإشارات
         process_signals(symbol, info, df)
-        return True
+        return True, "OK"
+        
     except Exception as e:
-        return False
+        error_msg = str(e)[:60]
+        return False, error_msg
 
 
 # ============================================
@@ -436,42 +479,47 @@ def send_report():
 # ============================================
 def main():
     print("=" * 60)
-    print("🤖 CE + ZLSMA Bot v7.0 - Kraken Edition")
+    print("🤖 CE + ZLSMA Bot v8.0 - Debug Mode")
     print("=" * 60)
     print(f"📊 العملات: {len(SYMBOLS)}")
     print(f"⏰ الإطار: {TIMEFRAME_MINUTES} دقيقة")
     print(f"🔄 الفحص: كل {SCAN_INTERVAL//60} دقيقة")
     print(f"💰 الرصيد: ${INITIAL_BALANCE}")
-    print(f"🌐 المصدر: Kraken (يعمل على Railway!)")
     print("=" * 60)
     
     # اختبار Kraken
-    print("\n📡 اختبار Kraken API...")
+    print("\n📡 اختبار Kraken...")
     test = get_kraken_data("XBTUSD", interval=15)
     
     if test is not None:
         print(f"✅ Kraken يعمل!")
-        print(f"   BTC آخر سعر: ${test['Close'].iloc[-1]:.2f}")
-        print(f"   عدد الشموع: {len(test)}")
+        print(f"   BTC: ${test['Close'].iloc[-1]:.2f}")
+        print(f"   الشموع: {len(test)}")
+        
+        # اختبار حساب المؤشرات على BTC
+        print("\n📊 اختبار المؤشرات على BTC...")
+        try:
+            test_signals = generate_signals(test)
+            if test_signals is not None:
+                print(f"   ✅ المؤشرات تعمل!")
+                print(f"   ✅ عدد الصفوف: {len(test_signals)}")
+            else:
+                print(f"   ❌ المؤشرات فشلت!")
+        except Exception as e:
+            print(f"   ❌ خطأ: {e}")
+            traceback.print_exc()
     else:
         print("❌ Kraken لا يعمل!")
         return
     
-    # رسالة البداية
     send_telegram(
-        f"🤖 <b>Trading Bot v7.0 - Kraken</b>\n\n"
-        f"✅ <b>تم التشغيل بنجاح!</b>\n\n"
-        f"📋 الاستراتيجية: CE + ZLSMA\n"
-        f"🌐 المصدر: Kraken API\n"
-        f"⚙️ الإعدادات:\n"
-        f"  • ATR: {ATR_PERIOD}, Multi: {ATR_MULTIPLIER}\n"
-        f"  • ZLSMA: {ZLSMA_LENGTH}\n"
-        f"  • Timeframe: {TIMEFRAME_MINUTES}m\n"
-        f"  • Scan: كل {SCAN_INTERVAL//60} دقيقة\n"
-        f"  • SL: {STOP_LOSS_PCT}%\n\n"
-        f"📊 <b>{len(SYMBOLS)} عملة كريبتو</b>\n"
-        f"💰 الرصيد: ${INITIAL_BALANCE}\n\n"
-        f"🚀 يعمل بشكل مثالي!"
+        f"🤖 <b>Trading Bot v8.0 - Debug</b>\n\n"
+        f"✅ <b>تم التشغيل!</b>\n\n"
+        f"📋 CE + ZLSMA على Kraken\n"
+        f"⚙️ Timeframe: {TIMEFRAME_MINUTES}m\n"
+        f"📊 {len(SYMBOLS)} عملة\n"
+        f"💰 ${INITIAL_BALANCE}\n\n"
+        f"🚀 جاري الفحص..."
     )
     
     scan_count = 0
@@ -486,37 +534,50 @@ def main():
             print(f"{'='*60}")
             
             success = 0
-            failed_symbols = []
+            errors = {}
             
             for i, (symbol, info) in enumerate(SYMBOLS.items(), 1):
                 print(f"  [{i:2}/{len(SYMBOLS)}] 🪙 {info['name']:15}", end=" ")
                 
-                if scan_symbol(symbol, info):
+                ok, msg = scan_symbol(symbol, info)
+                
+                if ok:
                     print("✓")
                     success += 1
                 else:
-                    print("❌")
-                    failed_symbols.append(info['name'])
+                    print(f"❌ {msg}")
+                    errors[msg] = errors.get(msg, 0) + 1
                 
                 time.sleep(DELAY_BETWEEN)
             
             print(f"\n📊 نجح: {success}/{len(SYMBOLS)}")
-            if failed_symbols and success < len(SYMBOLS):
-                print(f"❌ فشل: {', '.join(failed_symbols[:5])}")
+            
+            if errors:
+                print(f"❌ الأخطاء:")
+                for err, count in errors.items():
+                    print(f"   • {err}: {count} مرة")
+            
             print(f"💼 الرصيد: ${balance:.2f}")
             print(f"🔴 مفتوحة: {len(active_trades)}")
             print(f"📈 مغلقة: {len(trade_history)}")
             
-            # إرسال إحصائيات أول scan
-            if scan_count == 1 and success > 0:
-                send_telegram(
-                    f"✅ <b>أول فحص ناجح!</b>\n\n"
-                    f"📊 نجح: {success}/{len(SYMBOLS)} عملة\n"
-                    f"🔄 الفحص القادم بعد {SCAN_INTERVAL//60} دقيقة\n\n"
-                    f"⏳ انتظر ظهور الإشارات..."
-                )
+            # رسالة أول scan
+            if scan_count == 1:
+                if success > 0:
+                    send_telegram(
+                        f"✅ <b>أول فحص ناجح!</b>\n\n"
+                        f"📊 نجح: {success}/{len(SYMBOLS)}\n"
+                        f"⏳ الفحص القادم بعد {SCAN_INTERVAL//60} دقيقة"
+                    )
+                else:
+                    err_summary = ", ".join([f"{e}({c})" for e, c in list(errors.items())[:3]])
+                    send_telegram(
+                        f"⚠️ <b>فشل الفحص الأول!</b>\n\n"
+                        f"📊 نجح: 0/{len(SYMBOLS)}\n"
+                        f"❌ الأخطاء: {err_summary}\n"
+                        f"🔧 راجع Logs للتفاصيل"
+                    )
             
-            # تقرير كل 6 ساعات
             if (now - last_report).total_seconds() > 21600:
                 send_report()
                 last_report = now
@@ -529,6 +590,7 @@ def main():
             break
         except Exception as e:
             print(f"❌ خطأ: {e}")
+            traceback.print_exc()
             time.sleep(60)
 
 
