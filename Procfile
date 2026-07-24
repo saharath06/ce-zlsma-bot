@@ -1,0 +1,1 @@
+worker: python strategy_bot.py
