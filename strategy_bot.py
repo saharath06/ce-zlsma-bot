@@ -25,29 +25,45 @@ INITIAL_BALANCE    = 10000
 POSITION_SIZE_PCT  = 10
 
 # التوقيت
-TIMEFRAME       = "15m"
-SCAN_INTERVAL   = 900  # كل 15 دقيقة
-DELAY_BETWEEN   = 1.5
+TIMEFRAME_MINUTES = 15    # 15 دقيقة
+SCAN_INTERVAL     = 900   # كل 15 دقيقة
+DELAY_BETWEEN     = 1.5
 
 # ═══════════════════════════════════════
-# 🎯 العملات (استخدم أسماء CoinGecko)
+# 🎯 عملات Kraken (30 عملة!)
 # ═══════════════════════════════════════
 SYMBOLS = {
-    "bitcoin":       {"name": "Bitcoin",     "symbol": "BTC", "d": 2},
-    "ethereum":      {"name": "Ethereum",    "symbol": "ETH", "d": 2},
-    "binancecoin":   {"name": "BNB",         "symbol": "BNB", "d": 2},
-    "solana":        {"name": "Solana",      "symbol": "SOL", "d": 3},
-    "ripple":        {"name": "XRP",         "symbol": "XRP", "d": 4},
-    "cardano":       {"name": "Cardano",     "symbol": "ADA", "d": 4},
-    "avalanche-2":   {"name": "Avalanche",   "symbol": "AVAX","d": 3},
-    "dogecoin":      {"name": "Dogecoin",    "symbol": "DOGE","d": 5},
-    "polkadot":      {"name": "Polkadot",    "symbol": "DOT", "d": 3},
-    "matic-network": {"name": "Polygon",     "symbol": "MATIC","d":4},
-    "chainlink":     {"name": "Chainlink",   "symbol": "LINK","d": 3},
-    "litecoin":      {"name": "Litecoin",    "symbol": "LTC", "d": 2},
-    "uniswap":       {"name": "Uniswap",     "symbol": "UNI", "d": 3},
-    "cosmos":        {"name": "Cosmos",      "symbol": "ATOM","d": 3},
-    "near":          {"name": "NEAR",        "symbol": "NEAR","d": 3},
+    # Top Cryptocurrencies
+    "XBTUSD":   {"name": "Bitcoin",     "d": 2},
+    "ETHUSD":   {"name": "Ethereum",    "d": 2},
+    "SOLUSD":   {"name": "Solana",      "d": 3},
+    "XRPUSD":   {"name": "XRP",         "d": 4},
+    "ADAUSD":   {"name": "Cardano",     "d": 4},
+    "DOTUSD":   {"name": "Polkadot",    "d": 3},
+    "LINKUSD":  {"name": "Chainlink",   "d": 3},
+    "LTCUSD":   {"name": "Litecoin",    "d": 2},
+    "UNIUSD":   {"name": "Uniswap",     "d": 3},
+    "AVAXUSD":  {"name": "Avalanche",   "d": 3},
+    "MATICUSD": {"name": "Polygon",     "d": 4},
+    "ATOMUSD":  {"name": "Cosmos",      "d": 3},
+    "NEARUSD":  {"name": "NEAR",        "d": 3},
+    "APTUSD":   {"name": "Aptos",       "d": 3},
+    "ARBUSD":   {"name": "Arbitrum",    "d": 4},
+    "OPUSD":    {"name": "Optimism",    "d": 4},
+    "INJUSD":   {"name": "Injective",   "d": 3},
+    "SUIUSD":   {"name": "Sui",         "d": 4},
+    "ALGOUSD":  {"name": "Algorand",    "d": 4},
+    "FILUSD":   {"name": "Filecoin",    "d": 3},
+    "XLMUSD":   {"name": "Stellar",     "d": 5},
+    "TRXUSD":   {"name": "TRON",        "d": 5},
+    "ETCUSD":   {"name": "Eth Classic", "d": 3},
+    "BCHUSD":   {"name": "Bitcoin Cash","d": 2},
+    "AAVEUSD":  {"name": "Aave",        "d": 2},
+    "MKRUSD":   {"name": "Maker",       "d": 2},
+    "SNXUSD":   {"name": "Synthetix",   "d": 3},
+    "SANDUSD":  {"name": "Sandbox",     "d": 4},
+    "MANAUSD":  {"name": "Decentraland","d": 4},
+    "GRTUSD":   {"name": "The Graph",   "d": 4},
 }
 
 # متغيرات
@@ -55,10 +71,9 @@ active_trades = {}
 trade_history = []
 balance       = INITIAL_BALANCE
 
-# Headers لتقليد المتصفح
+# Headers
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'application/json'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
 
 
@@ -76,113 +91,34 @@ def send_telegram(text):
                 "text": text[i:i+4000],
                 "parse_mode": "HTML"
             }, timeout=15)
-            if r.status_code != 200:
-                print(f"⚠️ Telegram: {r.status_code}")
             time.sleep(0.3)
     except Exception as e:
         print(f"❌ Telegram: {e}")
 
 
 # ============================================
-# 🌐 مصدر 1: CoinGecko (الأفضل)
+# 🚀 Kraken API (يعمل من Railway!)
 # ============================================
-def get_data_coingecko(coin_id, days=5):
-    """جلب البيانات من CoinGecko - مجاني بدون تسجيل"""
-    try:
-        # OHLC data
-        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
-        params = {
-            "vs_currency": "usd",
-            "days": days
-        }
-        
-        response = requests.get(url, params=params, headers=HEADERS, timeout=10)
-        
-        if response.status_code != 200:
-            return None
-        
-        data = response.json()
-        
-        if not data or len(data) < 60:
-            return None
-        
-        # تحويل إلى DataFrame
-        df = pd.DataFrame(data, columns=['timestamp', 'Open', 'High', 'Low', 'Close'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        df.set_index('timestamp', inplace=True)
-        df['Volume'] = 0  # CoinGecko OHLC لا يعطي volume
-        
-        return df[['Open', 'High', 'Low', 'Close', 'Volume']]
-        
-    except Exception as e:
-        return None
-
-
-# ============================================
-# 🌐 مصدر 2: CryptoCompare
-# ============================================
-def get_data_cryptocompare(symbol, limit=200):
-    """جلب البيانات من CryptoCompare"""
-    try:
-        url = "https://min-api.cryptocompare.com/data/v2/histominute"
-        params = {
-            "fsym": symbol,
-            "tsym": "USD",
-            "limit": limit,
-            "aggregate": 15  # 15 دقيقة
-        }
-        
-        response = requests.get(url, params=params, headers=HEADERS, timeout=10)
-        
-        if response.status_code != 200:
-            return None
-        
-        data = response.json()
-        
-        if data.get('Response') != 'Success':
-            return None
-        
-        candles = data.get('Data', {}).get('Data', [])
-        if not candles or len(candles) < 60:
-            return None
-        
-        df = pd.DataFrame(candles)
-        df['timestamp'] = pd.to_datetime(df['time'], unit='s')
-        df.set_index('timestamp', inplace=True)
-        
-        df.rename(columns={
-            'open': 'Open',
-            'high': 'High',
-            'low': 'Low',
-            'close': 'Close',
-            'volumefrom': 'Volume'
-        }, inplace=True)
-        
-        return df[['Open', 'High', 'Low', 'Close', 'Volume']]
-        
-    except Exception as e:
-        return None
-
-
-# ============================================
-# 🌐 مصدر 3: Kraken
-# ============================================
-def get_data_kraken(symbol_map):
-    """جلب البيانات من Kraken"""
+def get_kraken_data(pair, interval=15):
+    """
+    جلب البيانات من Kraken
+    interval: 1, 5, 15, 30, 60, 240, 1440, 10080, 21600 (بالدقائق)
+    """
     try:
         url = "https://api.kraken.com/0/public/OHLC"
         params = {
-            "pair": symbol_map,
-            "interval": 15  # 15 دقيقة
+            "pair": pair,
+            "interval": interval
         }
         
-        response = requests.get(url, params=params, headers=HEADERS, timeout=10)
+        response = requests.get(url, params=params, headers=HEADERS, timeout=15)
         
         if response.status_code != 200:
             return None
         
         data = response.json()
         
+        # فحص الأخطاء
         if data.get('error') and len(data['error']) > 0:
             return None
         
@@ -197,13 +133,15 @@ def get_data_kraken(symbol_map):
         if not candles or len(candles) < 60:
             return None
         
+        # تحويل إلى DataFrame
         df = pd.DataFrame(candles, columns=[
             'timestamp', 'Open', 'High', 'Low', 'Close', 'vwap', 'Volume', 'count'
         ])
         
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        df['timestamp'] = pd.to_datetime(df['timestamp'].astype(int), unit='s')
         df.set_index('timestamp', inplace=True)
         
+        # تحويل الأنواع
         for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
             df[col] = df[col].astype(float)
         
@@ -211,42 +149,6 @@ def get_data_kraken(symbol_map):
         
     except Exception as e:
         return None
-
-
-# ============================================
-# 🎯 دالة موحدة (يجرب المصادر بالترتيب)
-# ============================================
-def get_data(coin_id, info):
-    """يجرب مصادر متعددة حتى ينجح"""
-    
-    # 1️⃣ جرب CoinGecko أولاً
-    df = get_data_coingecko(coin_id)
-    if df is not None:
-        return df, "CoinGecko"
-    
-    # 2️⃣ جرب CryptoCompare
-    df = get_data_cryptocompare(info['symbol'])
-    if df is not None:
-        return df, "CryptoCompare"
-    
-    # 3️⃣ جرب Kraken (بعض العملات فقط)
-    kraken_map = {
-        "BTC": "XBTUSD",
-        "ETH": "ETHUSD",
-        "SOL": "SOLUSD",
-        "ADA": "ADAUSD",
-        "DOT": "DOTUSD",
-        "LINK": "LINKUSD",
-        "LTC": "LTCUSD",
-        "UNI": "UNIUSD",
-        "MATIC": "MATICUSD",
-    }
-    if info['symbol'] in kraken_map:
-        df = get_data_kraken(kraken_map[info['symbol']])
-        if df is not None:
-            return df, "Kraken"
-    
-    return None, None
 
 
 # ============================================
@@ -365,7 +267,7 @@ def open_trade(symbol, info, signal_type, price, timestamp):
     
     msg = f"{emoji} <b>صفقة جديدة!</b>\n"
     msg += f"━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"🪙 {info['name']} ({info['symbol']})\n"
+    msg += f"🪙 {info['name']}\n"
     msg += f"📊 {'شراء LONG' if signal_type == 'BUY' else 'بيع SHORT'}\n"
     msg += f"━━━━━━━━━━━━━━━━━━━\n"
     msg += f"💵 الدخول: ${price:.{d}f}\n"
@@ -479,16 +381,16 @@ def process_signals(symbol, info, df):
 
 
 def scan_symbol(symbol, info):
-    df, source = get_data(symbol, info)
-    if df is None:
-        return False, None
+    df = get_kraken_data(symbol, interval=TIMEFRAME_MINUTES)
+    if df is None or len(df) < 60:
+        return False
     
     try:
         df = generate_signals(df)
         process_signals(symbol, info, df)
-        return True, source
+        return True
     except Exception as e:
-        return False, None
+        return False
 
 
 # ============================================
@@ -534,64 +436,40 @@ def send_report():
 # ============================================
 def main():
     print("=" * 60)
-    print("🤖 CE + ZLSMA Bot v6.0 - Multi-Source")
+    print("🤖 CE + ZLSMA Bot v7.0 - Kraken Edition")
     print("=" * 60)
     print(f"📊 العملات: {len(SYMBOLS)}")
-    print(f"⏰ الإطار: {TIMEFRAME}")
+    print(f"⏰ الإطار: {TIMEFRAME_MINUTES} دقيقة")
     print(f"🔄 الفحص: كل {SCAN_INTERVAL//60} دقيقة")
     print(f"💰 الرصيد: ${INITIAL_BALANCE}")
-    print(f"🌐 المصادر: CoinGecko + CryptoCompare + Kraken")
+    print(f"🌐 المصدر: Kraken (يعمل على Railway!)")
     print("=" * 60)
     
-    # اختبار المصادر
-    print("\n📡 اختبار المصادر...")
-    
-    sources_ok = []
-    
-    # اختبار CoinGecko
-    test_cg = get_data_coingecko("bitcoin")
-    if test_cg is not None:
-        print(f"✅ CoinGecko يعمل! BTC: ${test_cg['Close'].iloc[-1]:.2f}")
-        sources_ok.append("CoinGecko")
-    else:
-        print("❌ CoinGecko لا يعمل")
-    
-    # اختبار CryptoCompare
-    test_cc = get_data_cryptocompare("BTC")
-    if test_cc is not None:
-        print(f"✅ CryptoCompare يعمل! BTC: ${test_cc['Close'].iloc[-1]:.2f}")
-        sources_ok.append("CryptoCompare")
-    else:
-        print("❌ CryptoCompare لا يعمل")
-    
     # اختبار Kraken
-    test_kr = get_data_kraken("XBTUSD")
-    if test_kr is not None:
-        print(f"✅ Kraken يعمل! BTC: ${test_kr['Close'].iloc[-1]:.2f}")
-        sources_ok.append("Kraken")
+    print("\n📡 اختبار Kraken API...")
+    test = get_kraken_data("XBTUSD", interval=15)
+    
+    if test is not None:
+        print(f"✅ Kraken يعمل!")
+        print(f"   BTC آخر سعر: ${test['Close'].iloc[-1]:.2f}")
+        print(f"   عدد الشموع: {len(test)}")
     else:
-        print("❌ Kraken لا يعمل")
-    
-    if not sources_ok:
-        print("\n🚨 لا يوجد مصدر يعمل! المشكلة في Railway/الشبكة")
+        print("❌ Kraken لا يعمل!")
         return
-    
-    print(f"\n✅ {len(sources_ok)} مصدر يعمل: {', '.join(sources_ok)}")
     
     # رسالة البداية
     send_telegram(
-        f"🤖 <b>Trading Bot v6.0 - Multi-Source</b>\n\n"
+        f"🤖 <b>Trading Bot v7.0 - Kraken</b>\n\n"
         f"✅ <b>تم التشغيل بنجاح!</b>\n\n"
-        f"🌐 المصادر العاملة:\n" + 
-        "\n".join([f"  ✅ {s}" for s in sources_ok]) + "\n\n"
         f"📋 الاستراتيجية: CE + ZLSMA\n"
+        f"🌐 المصدر: Kraken API\n"
         f"⚙️ الإعدادات:\n"
         f"  • ATR: {ATR_PERIOD}, Multi: {ATR_MULTIPLIER}\n"
         f"  • ZLSMA: {ZLSMA_LENGTH}\n"
-        f"  • Timeframe: {TIMEFRAME}\n"
+        f"  • Timeframe: {TIMEFRAME_MINUTES}m\n"
         f"  • Scan: كل {SCAN_INTERVAL//60} دقيقة\n"
         f"  • SL: {STOP_LOSS_PCT}%\n\n"
-        f"📊 <b>{len(SYMBOLS)} عملة</b>\n"
+        f"📊 <b>{len(SYMBOLS)} عملة كريبتو</b>\n"
         f"💰 الرصيد: ${INITIAL_BALANCE}\n\n"
         f"🚀 يعمل بشكل مثالي!"
     )
@@ -608,27 +486,35 @@ def main():
             print(f"{'='*60}")
             
             success = 0
-            sources_used = {}
+            failed_symbols = []
             
             for i, (symbol, info) in enumerate(SYMBOLS.items(), 1):
                 print(f"  [{i:2}/{len(SYMBOLS)}] 🪙 {info['name']:15}", end=" ")
                 
-                ok, source = scan_symbol(symbol, info)
-                
-                if ok:
-                    print(f"✓ ({source})")
+                if scan_symbol(symbol, info):
+                    print("✓")
                     success += 1
-                    sources_used[source] = sources_used.get(source, 0) + 1
                 else:
                     print("❌")
+                    failed_symbols.append(info['name'])
                 
                 time.sleep(DELAY_BETWEEN)
             
             print(f"\n📊 نجح: {success}/{len(SYMBOLS)}")
-            print(f"🌐 المصادر: {sources_used}")
+            if failed_symbols and success < len(SYMBOLS):
+                print(f"❌ فشل: {', '.join(failed_symbols[:5])}")
             print(f"💼 الرصيد: ${balance:.2f}")
             print(f"🔴 مفتوحة: {len(active_trades)}")
             print(f"📈 مغلقة: {len(trade_history)}")
+            
+            # إرسال إحصائيات أول scan
+            if scan_count == 1 and success > 0:
+                send_telegram(
+                    f"✅ <b>أول فحص ناجح!</b>\n\n"
+                    f"📊 نجح: {success}/{len(SYMBOLS)} عملة\n"
+                    f"🔄 الفحص القادم بعد {SCAN_INTERVAL//60} دقيقة\n\n"
+                    f"⏳ انتظر ظهور الإشارات..."
+                )
             
             # تقرير كل 6 ساعات
             if (now - last_report).total_seconds() > 21600:
