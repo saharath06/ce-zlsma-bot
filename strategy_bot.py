@@ -27,9 +27,9 @@ INITIAL_BALANCE    = 10000
 POSITION_SIZE_PCT  = 5     # 5% لكل صفقة (لأن الأزواج كثيرة)
 
 # إعدادات الفحص
-SCAN_INTERVAL      = 90    # ثانية (بسبب 60 زوج)
-TIMEFRAME          = "1h"
-PERIOD             = "10d"
+SCAN_INTERVAL      = 180    # ثانية (بسبب 60 زوج)
+TIMEFRAME          = "15m"
+PERIOD             = "5d"
 
 # ============================================
 # 60 زوج متنوع
