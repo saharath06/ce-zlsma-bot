@@ -2,7 +2,6 @@ import os
 import requests
 import pandas as pd
 import numpy as np
-import yfinance as yf
 from datetime import datetime, timedelta
 import time
 import warnings
@@ -14,53 +13,47 @@ warnings.filterwarnings('ignore')
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID        = os.getenv("CHAT_ID", "")
 
-# إعدادات الاستراتيجية
+# استراتيجية
 ATR_PERIOD      = 1
 ATR_MULTIPLIER  = 2.0
 ZLSMA_LENGTH    = 50
-ZLSMA_OFFSET    = 0
 
-# إعدادات المخاطر
+# مخاطر
 USE_STOP_LOSS      = True
 STOP_LOSS_PCT      = 2.0
 INITIAL_BALANCE    = 10000
 POSITION_SIZE_PCT  = 10
 
-# ═══════════════════════════════════════
-# 🎯 الإعدادات الجديدة المحسّنة
-# ═══════════════════════════════════════
-TIMEFRAME       = "15m"    # إطار 15 دقيقة
-SCAN_INTERVAL   = 900      # فحص كل 15 دقيقة (كل شمعة)
-PERIOD          = "5d"     # 5 أيام بيانات
-DELAY_BETWEEN   = 2        # 2 ثانية بين كل طلب
-MAX_RETRIES     = 3        # إعادة المحاولة 3 مرات
+# التوقيت
+TIMEFRAME       = "15m"
+SCAN_INTERVAL   = 900  # كل 15 دقيقة
+DELAY_BETWEEN   = 0.5
 
 # ═══════════════════════════════════════
-# 📊 الأزواج المختارة بعناية (15 زوج فقط)
+# 🎯 كريبتو من Binance (20 عملة)
 # ═══════════════════════════════════════
 SYMBOLS = {
-    # 🪙 كريبتو الأشهر (5)
-    "BTC-USD":   {"name": "Bitcoin",   "cat": "crypto",   "d": 2},
-    "ETH-USD":   {"name": "Ethereum",  "cat": "crypto",   "d": 2},
-    "SOL-USD":   {"name": "Solana",    "cat": "crypto",   "d": 3},
-    "BNB-USD":   {"name": "BNB",       "cat": "crypto",   "d": 2},
-    "XRP-USD":   {"name": "XRP",       "cat": "crypto",   "d": 4},
-    
-    # 💱 فوركس الرئيسية (5)
-    "EURUSD=X":  {"name": "EUR/USD",   "cat": "forex",    "d": 5},
-    "GBPUSD=X":  {"name": "GBP/USD",   "cat": "forex",    "d": 5},
-    "USDJPY=X":  {"name": "USD/JPY",   "cat": "forex",    "d": 3},
-    "USDCHF=X":  {"name": "USD/CHF",   "cat": "forex",    "d": 5},
-    "AUDUSD=X":  {"name": "AUD/USD",   "cat": "forex",    "d": 5},
-    
-    # 🥇 سلع (3)
-    "GC=F":      {"name": "Gold",      "cat": "commodity","d": 2},
-    "SI=F":      {"name": "Silver",    "cat": "commodity","d": 3},
-    "CL=F":      {"name": "Crude Oil", "cat": "commodity","d": 2},
-    
-    # 📊 مؤشرات (2)
-    "^GSPC":     {"name": "S&P 500",   "cat": "index",    "d": 2},
-    "^IXIC":     {"name": "NASDAQ",    "cat": "index",    "d": 2},
+    # Top Cryptocurrencies
+    "BTCUSDT":   {"name": "Bitcoin",     "cat": "crypto", "d": 2},
+    "ETHUSDT":   {"name": "Ethereum",    "cat": "crypto", "d": 2},
+    "BNBUSDT":   {"name": "BNB",         "cat": "crypto", "d": 2},
+    "SOLUSDT":   {"name": "Solana",      "cat": "crypto", "d": 3},
+    "XRPUSDT":   {"name": "XRP",         "cat": "crypto", "d": 4},
+    "ADAUSDT":   {"name": "Cardano",     "cat": "crypto", "d": 4},
+    "AVAXUSDT":  {"name": "Avalanche",   "cat": "crypto", "d": 3},
+    "DOGEUSDT":  {"name": "Dogecoin",    "cat": "crypto", "d": 5},
+    "DOTUSDT":   {"name": "Polkadot",    "cat": "crypto", "d": 3},
+    "MATICUSDT": {"name": "Polygon",     "cat": "crypto", "d": 4},
+    "LINKUSDT":  {"name": "Chainlink",   "cat": "crypto", "d": 3},
+    "LTCUSDT":   {"name": "Litecoin",    "cat": "crypto", "d": 2},
+    "UNIUSDT":   {"name": "Uniswap",     "cat": "crypto", "d": 3},
+    "ATOMUSDT":  {"name": "Cosmos",      "cat": "crypto", "d": 3},
+    "NEARUSDT":  {"name": "NEAR",        "cat": "crypto", "d": 3},
+    "APTUSDT":   {"name": "Aptos",       "cat": "crypto", "d": 3},
+    "ARBUSDT":   {"name": "Arbitrum",    "cat": "crypto", "d": 4},
+    "OPUSDT":    {"name": "Optimism",    "cat": "crypto", "d": 4},
+    "INJUSDT":   {"name": "Injective",   "cat": "crypto", "d": 3},
+    "SUIUSDT":   {"name": "Sui",         "cat": "crypto", "d": 4},
 }
 
 # متغيرات
@@ -74,7 +67,6 @@ balance       = INITIAL_BALANCE
 # ============================================
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        print("⚠️ Telegram not configured!")
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -85,10 +77,55 @@ def send_telegram(text):
                 "parse_mode": "HTML"
             }, timeout=15)
             if r.status_code != 200:
-                print(f"⚠️ Telegram error: {r.text}")
+                print(f"⚠️ Telegram: {r.status_code} - {r.text[:100]}")
             time.sleep(0.3)
     except Exception as e:
         print(f"❌ Telegram: {e}")
+
+
+# ============================================
+# 🚀 Binance API (مجاني، بدون مفتاح!)
+# ============================================
+def get_binance_klines(symbol, interval="15m", limit=200):
+    """جلب البيانات من Binance مباشرة"""
+    try:
+        url = "https://api.binance.com/api/v3/klines"
+        params = {
+            "symbol": symbol,
+            "interval": interval,
+            "limit": limit
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code != 200:
+            return None
+        
+        data = response.json()
+        
+        # تحويل البيانات إلى DataFrame
+        df = pd.DataFrame(data, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+            'taker_buy_quote', 'ignore'
+        ])
+        
+        # تحويل الأنواع
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        
+        # نعيد التسمية لتتوافق مع الكود
+        df['Open']   = df['open'].astype(float)
+        df['High']   = df['high'].astype(float)
+        df['Low']    = df['low'].astype(float)
+        df['Close']  = df['close'].astype(float)
+        df['Volume'] = df['volume'].astype(float)
+        
+        return df[['Open', 'High', 'Low', 'Close', 'Volume']]
+        
+    except Exception as e:
+        print(f"    ❌ Binance: {str(e)[:60]}")
+        return None
 
 
 # ============================================
@@ -165,7 +202,7 @@ def calculate_zlsma(df, length=50, offset=0):
 def generate_signals(df):
     df = df.copy()
     df['CE_Dir'] = calculate_chandelier_exit(df, ATR_PERIOD, ATR_MULTIPLIER)
-    df['ZLSMA']  = calculate_zlsma(df, ZLSMA_LENGTH, ZLSMA_OFFSET)
+    df['ZLSMA']  = calculate_zlsma(df, ZLSMA_LENGTH)
     
     df['CE_Buy']  = (df['CE_Dir'] == 1)  & (df['CE_Dir'].shift(1) == -1)
     df['CE_Sell'] = (df['CE_Dir'] == -1) & (df['CE_Dir'].shift(1) == 1)
@@ -206,16 +243,14 @@ def open_trade(symbol, info, signal_type, price, timestamp):
     emoji = "🟢" if signal_type == "BUY" else "🔴"
     d = info['d']
     
-    cat_emoji = {"forex":"💱","crypto":"🪙","commodity":"🥇","index":"📊","stock":"🏢"}.get(info['cat'],"📈")
-    
     msg = f"{emoji} <b>صفقة جديدة!</b>\n"
     msg += f"━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"{cat_emoji} {info['name']}\n"
+    msg += f"🪙 {info['name']} ({symbol})\n"
     msg += f"📊 {'شراء LONG' if signal_type == 'BUY' else 'بيع SHORT'}\n"
     msg += f"━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"💵 الدخول: {price:.{d}f}\n"
+    msg += f"💵 الدخول: ${price:.{d}f}\n"
     if sl:
-        msg += f"🛡️ SL: {sl:.{d}f} ({STOP_LOSS_PCT}%)\n"
+        msg += f"🛡️ SL: ${sl:.{d}f} ({STOP_LOSS_PCT}%)\n"
     msg += f"🎯 الخروج: عند الإشارة العكسية\n"
     msg += f"━━━━━━━━━━━━━━━━━━━\n"
     msg += f"💰 الحجم: ${trade_size:.2f}\n"
@@ -225,7 +260,7 @@ def open_trade(symbol, info, signal_type, price, timestamp):
     msg += f"📊 مفتوحة: {len(active_trades)}"
     
     send_telegram(msg)
-    print(f"✅ OPEN: {info['name']} {signal_type} @ {price:.{d}f}")
+    print(f"✅ OPEN: {info['name']} {signal_type} @ ${price:.{d}f}")
     return trade
 
 
@@ -265,16 +300,14 @@ def close_trade(symbol, close_price, reason, timestamp):
     hours = int(duration.total_seconds() / 3600)
     minutes = int((duration.total_seconds() % 3600) / 60)
     
-    cat_emoji = {"forex":"💱","crypto":"🪙","commodity":"🥇","index":"📊","stock":"🏢"}.get(info['cat'],"📈")
-    
     msg = f"{emoji} <b>صفقة مغلقة!</b>\n"
     msg += f"━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"{cat_emoji} {trade['name']}\n"
+    msg += f"🪙 {trade['name']}\n"
     msg += f"📊 {trade['type']}\n"
     msg += f"🔔 {reason}\n"
     msg += f"━━━━━━━━━━━━━━━━━━━\n"
-    msg += f"💵 دخول: {trade['entry_price']:.{d}f}\n"
-    msg += f"💸 خروج: {close_price:.{d}f}\n"
+    msg += f"💵 دخول: ${trade['entry_price']:.{d}f}\n"
+    msg += f"💸 خروج: ${close_price:.{d}f}\n"
     msg += f"⏱️ المدة: {hours}س {minutes}د\n"
     msg += f"━━━━━━━━━━━━━━━━━━━\n"
     msg += f"{'🟢' if is_profit else '🔴'} <b>{result}: {profit_pct:+.2f}%</b>\n"
@@ -326,43 +359,11 @@ def process_signals(symbol, info, df):
 
 
 # ============================================
-# 🎯 جلب البيانات المحسّن (مع Retry)
+# فحص العملة
 # ============================================
-def get_data(symbol):
-    """جلب البيانات مع محاولات متعددة"""
-    for attempt in range(MAX_RETRIES):
-        try:
-            df = yf.download(
-                symbol,
-                period=PERIOD,
-                interval=TIMEFRAME,
-                progress=False,
-                auto_adjust=True,
-                threads=False  # ⭐ مهم! يمنع Rate Limiting
-            )
-            
-            if df.empty or len(df) < 60:
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(3)  # انتظر قبل المحاولة التالية
-                    continue
-                return None
-            
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            
-            return df
-        except Exception as e:
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(3)
-                continue
-            print(f"    ❌ خطأ: {str(e)[:50]}")
-            return None
-    return None
-
-
 def scan_symbol(symbol, info):
-    df = get_data(symbol)
-    if df is None:
+    df = get_binance_klines(symbol, interval=TIMEFRAME, limit=200)
+    if df is None or len(df) < 60:
         return False
     
     try:
@@ -370,7 +371,7 @@ def scan_symbol(symbol, info):
         process_signals(symbol, info, df)
         return True
     except Exception as e:
-        print(f"    ❌ إشارة: {str(e)[:50]}")
+        print(f"    ❌ خطأ: {str(e)[:60]}")
         return False
 
 
@@ -407,7 +408,7 @@ def send_report():
     if active_trades:
         for sym, t in active_trades.items():
             d = SYMBOLS[sym]['d']
-            msg += f"  • {t['name']} {t['type']} @ {t['entry_price']:.{d}f}\n"
+            msg += f"  • {t['name']} {t['type']} @ ${t['entry_price']:.{d}f}\n"
     
     send_telegram(msg)
 
@@ -417,45 +418,39 @@ def send_report():
 # ============================================
 def main():
     print("=" * 60)
-    print("🤖 CE + ZLSMA Bot v4.0 - Optimized")
+    print("🤖 CE + ZLSMA Bot v5.0 - Binance Edition")
     print("=" * 60)
-    print(f"📊 الأزواج: {len(SYMBOLS)} (مختارة بعناية)")
+    print(f"📊 العملات: {len(SYMBOLS)}")
     print(f"⏰ الإطار: {TIMEFRAME}")
     print(f"🔄 الفحص: كل {SCAN_INTERVAL//60} دقيقة")
     print(f"💰 الرصيد: ${INITIAL_BALANCE}")
+    print(f"🌐 المصدر: Binance API (بدون حظر!)")
     print("=" * 60)
     
-    # اختبار تلغرام أولاً
-    print("📱 اختبار تلغرام...")
-    if TELEGRAM_TOKEN and CHAT_ID:
-        print(f"   Token: {TELEGRAM_TOKEN[:20]}...")
-        print(f"   Chat: {CHAT_ID}")
+    # اختبار Binance
+    print("\n📡 اختبار Binance API...")
+    test = get_binance_klines("BTCUSDT", interval="15m", limit=5)
+    if test is not None and len(test) > 0:
+        print(f"✅ Binance يعمل! BTC آخر سعر: ${test['Close'].iloc[-1]:.2f}")
     else:
-        print("   ❌ Variables غير موجودة!")
+        print("❌ Binance لا يعمل!")
+        return
     
     # رسالة البداية
-    cats = {}
-    for s, info in SYMBOLS.items():
-        cats[info['cat']] = cats.get(info['cat'], 0) + 1
-    
-    cat_text = ""
-    for c, n in cats.items():
-        emoji = {"forex":"💱","crypto":"🪙","commodity":"🥇","index":"📊","stock":"🏢"}.get(c,"📈")
-        cat_text += f"  {emoji} {c}: {n}\n"
-    
     send_telegram(
-        f"🤖 <b>Trading Bot v4.0 - Optimized</b>\n\n"
+        f"🤖 <b>Trading Bot v5.0 - Binance</b>\n\n"
         f"✅ <b>تم التشغيل بنجاح!</b>\n\n"
         f"📋 الاستراتيجية: CE + ZLSMA\n"
+        f"🌐 المصدر: Binance (لا حظر!)\n"
         f"⚙️ الإعدادات:\n"
         f"  • ATR: {ATR_PERIOD}, Multi: {ATR_MULTIPLIER}\n"
         f"  • ZLSMA: {ZLSMA_LENGTH}\n"
         f"  • Timeframe: {TIMEFRAME}\n"
         f"  • Scan: كل {SCAN_INTERVAL//60} دقيقة\n"
         f"  • SL: {STOP_LOSS_PCT}%\n\n"
-        f"📊 الأزواج ({len(SYMBOLS)}):\n{cat_text}\n"
+        f"📊 <b>{len(SYMBOLS)} عملة كريبتو</b>\n"
         f"💰 الرصيد: ${INITIAL_BALANCE}\n\n"
-        f"⏰ ابدأ في مراقبة الأسواق..."
+        f"🚀 يعمل بشكل مثالي!"
     )
     
     scan_count = 0
@@ -470,35 +465,22 @@ def main():
             print(f"{'='*60}")
             
             success = 0
-            failed = 0
             
             for i, (symbol, info) in enumerate(SYMBOLS.items(), 1):
-                emoji = {"forex":"💱","crypto":"🪙","commodity":"🥇","index":"📊","stock":"🏢"}.get(info['cat'],"📈")
-                print(f"  [{i:2}/{len(SYMBOLS)}] {emoji} {info['name']:15}", end=" ")
+                print(f"  [{i:2}/{len(SYMBOLS)}] 🪙 {info['name']:15}", end=" ")
                 
                 if scan_symbol(symbol, info):
                     print("✓")
                     success += 1
                 else:
                     print("❌")
-                    failed += 1
                 
-                # ⭐ تأخير بين الطلبات لتجنب Rate Limiting
                 time.sleep(DELAY_BETWEEN)
             
             print(f"\n📊 نجح: {success}/{len(SYMBOLS)}")
             print(f"💼 الرصيد: ${balance:.2f}")
             print(f"🔴 مفتوحة: {len(active_trades)}")
             print(f"📈 مغلقة: {len(trade_history)}")
-            
-            # إذا فشلت الكثير، أرسل تحذير
-            if failed > success and scan_count == 1:
-                send_telegram(
-                    f"⚠️ <b>تحذير!</b>\n\n"
-                    f"فشل جلب بيانات {failed} زوج من أصل {len(SYMBOLS)}\n"
-                    f"Yahoo Finance قد يحدد الطلبات\n\n"
-                    f"سيحاول مرة أخرى في الفحص القادم"
-                )
             
             # تقرير كل 6 ساعات
             if (now - last_report).total_seconds() > 21600:
